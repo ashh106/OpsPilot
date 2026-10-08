@@ -1,0 +1,198 @@
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MemberRole {
+  OWNER
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  TOOL
+}
+
+enum ToolStatus {
+  SUCCESS
+  ERROR
+}
+
+enum ActorType {
+  OWNER
+  CUSTOMER
+  AI
+}
+
+model User {
+  id           String           @id @default(uuid()) @db.Uuid
+  email        String           @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime         @default(now())
+  memberships  BusinessMember[]
+}
+
+model Business {
+  id                      String           @id @default(uuid()) @db.Uuid
+  slug                    String           @unique
+  name                    String
+  description             String           @default("")
+  timezone                String           @default("Asia/Kolkata")
+  cancellationPolicy      String           @default("")
+  cancellationNoticeHours Int              @default(2)
+  createdAt               DateTime         @default(now())
+  updatedAt               DateTime         @updatedAt
+  members                 BusinessMember[]
+  services                Service[]
+  hours                   BusinessHours[]
+  customers               Customer[]
+  appointments            Appointment[]
+  conversations           Conversation[]
+  toolExecutions          ToolExecution[]
+  activityLogs            ActivityLog[]
+}
+
+model BusinessMember {
+  id         String     @id @default(uuid()) @db.Uuid
+  userId     String     @db.Uuid
+  businessId String     @db.Uuid
+  role       MemberRole @default(OWNER)
+  createdAt  DateTime   @default(now())
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business   Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, businessId])
+  @@index([businessId])
+}
+
+model Service {
+  id              String        @id @default(uuid()) @db.Uuid
+  businessId      String        @db.Uuid
+  name            String
+  description     String        @default("")
+  durationMinutes Int
+  price           Decimal       @db.Decimal(10, 2)
+  currency        String        @default("INR")
+  active          Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  business        Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointments    Appointment[]
+
+  @@index([businessId])
+}
+
+// One open interval per weekday (0 = Sunday ... 6 = Saturday). No row = closed that day.
+model BusinessHours {
+  id         String   @id @default(uuid()) @db.Uuid
+  businessId String   @db.Uuid
+  dayOfWeek  Int
+  openTime   String // "HH:mm" in the business timezone
+  closeTime  String // "HH:mm" in the business timezone
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, dayOfWeek])
+}
+
+model Customer {
+  id            String         @id @default(uuid()) @db.Uuid
+  businessId    String         @db.Uuid
+  name          String
+  phone         String?
+  email         String?
+  createdAt     DateTime       @default(now())
+  business      Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointments  Appointment[]
+  conversations Conversation[]
+
+  @@index([businessId])
+  @@index([businessId, phone])
+  @@index([businessId, email])
+}
+
+model Appointment {
+  id         String            @id @default(uuid()) @db.Uuid
+  businessId String            @db.Uuid
+  customerId String            @db.Uuid
+  serviceId  String            @db.Uuid
+  startTime  DateTime
+  endTime    DateTime
+  status     AppointmentStatus @default(CONFIRMED)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+  business   Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer   Customer          @relation(fields: [customerId], references: [id])
+  service    Service           @relation(fields: [serviceId], references: [id])
+
+  @@index([businessId, startTime])
+  @@index([customerId])
+}
+
+model Conversation {
+  id             String          @id @default(uuid()) @db.Uuid
+  businessId     String          @db.Uuid
+  customerId     String?         @db.Uuid
+  tokenHash      String // sha256 of the secret token held by the chat client
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  business       Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer       Customer?       @relation(fields: [customerId], references: [id])
+  messages       Message[]
+  toolExecutions ToolExecution[]
+
+  @@index([businessId, updatedAt])
+}
+
+model Message {
+  id             String       @id @default(uuid()) @db.Uuid
+  conversationId String       @db.Uuid
+  role           MessageRole
+  content        String
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+model ToolExecution {
+  id             String       @id @default(uuid()) @db.Uuid
+  businessId     String       @db.Uuid
+  conversationId String       @db.Uuid
+  toolName       String
+  input          Json
+  result         Json
+  status         ToolStatus
+  createdAt      DateTime     @default(now())
+  business       Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, createdAt])
+  @@index([conversationId])
+}
+
+model ActivityLog {
+  id         String    @id @default(uuid()) @db.Uuid
+  businessId String    @db.Uuid
+  actor      ActorType
+  action     String
+  entityType String
+  entityId   String?
+  metadata   Json      @default("{}")
+  createdAt  DateTime  @default(now())
+  business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, createdAt])
+}
