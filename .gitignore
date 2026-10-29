@@ -1,9 +1,64 @@
+# Dependencies
 node_modules/
+.pnpm-store/
+
+# Production & Build outputs
 dist/
+dist-ssr/
+build/
+out/
 .next/
+.output/
+*.tsbuildinfo
+
+# Test & Coverage artifacts
 coverage/
+.nyc_output/
+test-results/
+
+# Environment files and secrets
 .env
 .env.*
+.env*.local
 !.env.example
+!.env.test.example
+
+# Logs
+logs/
 *.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# OS-generated files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE & Editor files
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swp
+*.swo
+
+# Temporary directories and cache
+.tmp/
+.temp/
+.turbo/
+.cache/
+.ezscvda
+
+# Local databases & dumps
+*.sqlite
+*.sqlite-journal
+*.db-journal
+*.dump
+*.sql.gz

@@ -12,6 +12,26 @@ enum MemberRole {
   OWNER
 }
 
+enum BusinessCategory {
+  CLINIC
+  GROCERY
+  RESTAURANT
+  RETAIL
+  GYM
+  PHYSIOTHERAPY
+  RENTAL
+  GENERAL
+}
+
+enum InventoryChangeType {
+  MANUAL_TEXT
+  VOICE_NOTE
+  WEB_DASHBOARD
+  SALE
+  RESTOCK
+  ADJUSTMENT
+}
+
 enum AppointmentStatus {
   PENDING
   CONFIRMED
@@ -36,13 +56,35 @@ enum ActorType {
   AI
 }
 
+enum InboxStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+enum ConversationWorkflowState {
+  IDLE
+  SELECTING_SERVICE
+  SELECTING_DATE
+  OFFERING_SLOTS
+  COLLECTING_DETAILS
+  AWAITING_CONFIRMATION
+  BOOKED
+  RESCHEDULING
+  CANCELLING
+  ESCALATION_REQUIRED
+}
+
 model User {
-  id           String           @id @default(uuid()) @db.Uuid
-  email        String           @unique
-  passwordHash String
-  name         String
-  createdAt    DateTime         @default(now())
-  memberships  BusinessMember[]
+  id            String           @id @default(uuid()) @db.Uuid
+  email         String           @unique
+  passwordHash  String
+  name          String
+  phone         String?          @unique
+  phoneVerified Boolean          @default(false)
+  createdAt     DateTime         @default(now())
+  memberships   BusinessMember[]
 }
 
 model Business {
@@ -53,16 +95,21 @@ model Business {
   timezone                String           @default("Asia/Kolkata")
   cancellationPolicy      String           @default("")
   cancellationNoticeHours Int              @default(2)
+  category                BusinessCategory @default(CLINIC)
+  defaultLanguage         String           @default("en")
+  supportedLanguages      String[]         @default(["en", "hi", "mr"])
   createdAt               DateTime         @default(now())
   updatedAt               DateTime         @updatedAt
   members                 BusinessMember[]
   services                Service[]
+  products                Product[]
   hours                   BusinessHours[]
   customers               Customer[]
   appointments            Appointment[]
   conversations           Conversation[]
   toolExecutions          ToolExecution[]
   activityLogs            ActivityLog[]
+  inventoryAudits         InventoryAudit[]
 }
 
 model BusinessMember {
@@ -95,6 +142,27 @@ model Service {
   @@index([businessId])
 }
 
+model Product {
+  id              String           @id @default(uuid()) @db.Uuid
+  businessId      String           @db.Uuid
+  name            String
+  description     String           @default("")
+  sku             String?
+  price           Decimal          @db.Decimal(10, 2)
+  currency        String           @default("INR")
+  stockQuantity   Int              @default(0)
+  unit            String           @default("pcs")
+  active          Boolean          @default(true)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  business        Business         @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  inventoryAudits InventoryAudit[]
+
+  @@unique([businessId, sku])
+  @@index([businessId, active])
+  @@index([businessId, name])
+}
+
 // One open interval per weekday (0 = Sunday ... 6 = Saturday). No row = closed that day.
 model BusinessHours {
   id         String   @id @default(uuid()) @db.Uuid
@@ -124,47 +192,79 @@ model Customer {
 }
 
 model Appointment {
-  id         String            @id @default(uuid()) @db.Uuid
-  businessId String            @db.Uuid
-  customerId String            @db.Uuid
-  serviceId  String            @db.Uuid
-  startTime  DateTime
-  endTime    DateTime
-  status     AppointmentStatus @default(CONFIRMED)
-  createdAt  DateTime          @default(now())
-  updatedAt  DateTime          @updatedAt
-  business   Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customer   Customer          @relation(fields: [customerId], references: [id])
-  service    Service           @relation(fields: [serviceId], references: [id])
+  id             String            @id @default(uuid()) @db.Uuid
+  businessId     String            @db.Uuid
+  customerId     String            @db.Uuid
+  serviceId      String            @db.Uuid
+  startTime      DateTime
+  endTime        DateTime
+  status         AppointmentStatus @default(CONFIRMED)
+  idempotencyKey String?           @unique
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  business       Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer       Customer          @relation(fields: [customerId], references: [id])
+  service        Service           @relation(fields: [serviceId], references: [id])
 
   @@index([businessId, startTime])
   @@index([customerId])
+  @@index([idempotencyKey])
 }
 
 model Conversation {
-  id             String          @id @default(uuid()) @db.Uuid
-  businessId     String          @db.Uuid
-  customerId     String?         @db.Uuid
-  tokenHash      String // sha256 of the secret token held by the chat client
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  business       Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  customer       Customer?       @relation(fields: [customerId], references: [id])
-  messages       Message[]
-  toolExecutions ToolExecution[]
+  id              String                    @id @default(uuid()) @db.Uuid
+  businessId      String                    @db.Uuid
+  customerId      String?                   @db.Uuid
+  tokenHash       String // sha256 of the secret token held by the chat client
+  language        String                    @default("en")
+  workflowState   ConversationWorkflowState @default(IDLE)
+  pendingProposal Json?
+  stateVersion    Int                       @default(0)
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  business        Business                  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer        Customer?                 @relation(fields: [customerId], references: [id])
+  messages        Message[]
+  toolExecutions  ToolExecution[]
 
   @@index([businessId, updatedAt])
+  @@index([businessId, workflowState])
 }
 
 model Message {
-  id             String       @id @default(uuid()) @db.Uuid
-  conversationId String       @db.Uuid
-  role           MessageRole
-  content        String
-  createdAt      DateTime     @default(now())
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  id                String       @id @default(uuid()) @db.Uuid
+  conversationId    String       @db.Uuid
+  role              MessageRole
+  content           String
+  providerMessageId String?
+  status            String?
+  createdAt         DateTime     @default(now())
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId, createdAt])
+  @@index([providerMessageId])
+}
+
+model WebhookInbox {
+  id                String      @id @default(uuid()) @db.Uuid
+  provider          String      @default("whatsapp")
+  providerMessageId String      @unique
+  eventType         String // "message" or "status"
+  businessId        String?     @db.Uuid
+  payload           Json
+  status            InboxStatus @default(PENDING)
+  attempts          Int         @default(0)
+  lastError         String?
+  lockedAt          DateTime?
+  lockedBy          String?
+  nextRetryAt       DateTime?
+  processedAt       DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  @@index([status, createdAt])
+  @@index([status, nextRetryAt])
+  @@index([providerMessageId])
 }
 
 model ToolExecution {
@@ -195,4 +295,26 @@ model ActivityLog {
   business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([businessId, createdAt])
+}
+
+model InventoryAudit {
+  id               String              @id @default(uuid()) @db.Uuid
+  businessId       String              @db.Uuid
+  productId        String              @db.Uuid
+  changeType       InventoryChangeType
+  quantityDelta    Int
+  previousQuantity Int
+  newQuantity      Int
+  previousPrice    Decimal?            @db.Decimal(10, 2)
+  newPrice         Decimal?            @db.Decimal(10, 2)
+  performedBy      String
+  reason           String?
+  idempotencyKey   String?             @unique
+  createdAt        DateTime            @default(now())
+  business         Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  product          Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, createdAt])
+  @@index([productId, createdAt])
+  @@index([idempotencyKey])
 }
