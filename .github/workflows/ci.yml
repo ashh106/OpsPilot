@@ -51,6 +51,8 @@ jobs:
 
       - name: Validate Prisma Schema
         working-directory: backend
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/opspilot_test
         run: npx prisma validate
 
       - name: Deploy Database Migrations
